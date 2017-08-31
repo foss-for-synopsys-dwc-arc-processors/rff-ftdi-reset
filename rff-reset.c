@@ -76,7 +76,13 @@ int find_all_ftdev(void)
 
 void print_help(void)
 {
-	rff_info("HELP ME!! 0_o\n");
+	rff_info("Usage: rff-reset --dev 0 --t-hold 100000\n");
+	rff_info("Options:\n");
+	rff_info("--dev <device number>  - specify ftdi device\n");
+	rff_info("--t-hold <time in uS>  - specify hold time\n");
+	rff_info("--list-dev             - find and list all connected ftdi devices\n");
+	rff_info("--help                 - print this info\n");
+	rff_info("--verbose              - print debug info and warnings\n");
 }
 
 int parse_options(int argc, char **argv)
