@@ -1,3 +1,6 @@
+# Output binary
+rff-reset
+
 # Prerequisites
 *.d
 
