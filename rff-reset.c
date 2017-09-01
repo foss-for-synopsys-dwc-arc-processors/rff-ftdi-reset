@@ -15,10 +15,10 @@
 #include <libusb-1.0/libusb.h>
 //#include <libusb.h>
 
-#define RESET_PIN_MASK		0x40		//ACBUS6
-#define IO_BUFF_SIZE		3
-#define T_HOLD			(1 * 1000000)
-#define USB_STR_PROP_SIZE	128
+#define RESET_PIN_MASK		0x40		//ACBUS6 pin mask
+#define IO_BUFF_SIZE		3		//buff for ftdi_write_data: comand with 2 args
+#define T_HOLD			(1 * 1000000)	//default hold time
+#define USB_STR_PROP_SIZE	128		//
 
 struct g_args_t {
 	unsigned long	device;
@@ -28,13 +28,12 @@ struct g_args_t {
 };
 
 struct g_args_t g_args = {
-	.device = 0,
 	.t_hold = T_HOLD,
 	.verbose = false,
 };
 
 #define pr_fmt(fmt) "rff: " fmt
-#define rff_info(fmt, ...)	printf(pr_fmt(fmt), ##__VA_ARGS__)
+#define rff_info(fmt, ...)	fprintf(stdout, pr_fmt(fmt), ##__VA_ARGS__)
 #define rff_err(fmt, ...)	fprintf(stderr, pr_fmt(fmt), ##__VA_ARGS__)
 #define rff_warn(fmt, ...)	({if (g_args.verbose) rff_err(fmt, ##__VA_ARGS__);})
 #define rff_dbg(fmt, ...)	({if (g_args.verbose) rff_info(fmt, ##__VA_ARGS__);})
@@ -48,6 +47,7 @@ int find_all_ftdev(void)
 	char serial_num[USB_STR_PROP_SIZE];
 	struct libusb_device_descriptor desc;
 	int i, ret;
+
 	ftdi = ftdi_new();
 	if (ftdi == NULL) {
 		rff_err("ftdi_new failed\n");
@@ -63,27 +63,33 @@ int find_all_ftdev(void)
 	rff_info("number of FTDI devices found: %d\n", ret);
 
 	for (i = 0, curdev = devlist; curdev != NULL; i++, curdev = curdev->next) {
-		if (libusb_get_device_descriptor(curdev->dev, &desc) < 0)
-			rff_err("device [%d] libusb_get_device_descriptor() failed", i);
-		else
-			rff_info("device [%d] idVendor: %#x, idProduct %#x\n", i, desc.idVendor, desc.idProduct);
+		ret = libusb_get_device_descriptor(curdev->dev, &desc);
+		if (ret < 0) {
+			rff_err("device [%d] libusb_get_device_descriptor() failed: %d\n", i, ret);
+			continue;
+		}
+
+		rff_info("device [%d] idVendor: %#x, idProduct %#x\n", i, desc.idVendor, desc.idProduct);
 
 		ret = ftdi_usb_get_strings(ftdi, curdev->dev,
 						manufacturer, USB_STR_PROP_SIZE,
 						description, USB_STR_PROP_SIZE,
 						serial_num, USB_STR_PROP_SIZE);
-		if (ret < 0)
+		if (ret < 0) {
 			rff_err("device [%d] ftdi_usb_get_strings failed: %d (%s)\n", i, ret, ftdi_get_error_string(ftdi));
-		else
-			rff_info("device [%d] manufacturer: %s, description: %s, serial: %s\n\n", i, manufacturer, description, serial_num);
+			continue;
+		}
+
+		rff_info("device [%d] manufacturer: %s, description: %s, serial: %s\n\n", i, manufacturer, description, serial_num);
 	}
 }
 
 void print_help(void)
 {
 	rff_info("Usage: rff-reset --serial 25164200005c --t-hold 100000\n");
+	rff_info("Usage: rff-reset --dev 1 --t-hold 100000\n");
 	rff_info("Options:\n");
-	rff_info("--dev <device index>     - specify ftdi device by index\n");
+	rff_info("--dev <device index>     - specify ftdi device by index (shown by rff-reset --list-dev)\n");
 	rff_info("--serial <serial number> - specify ftdi device by serial number\n");
 	rff_info("--t-hold <time in uS>    - specify hold time\n");
 	rff_info("--list-dev               - find and list all connected ftdi devices\n");
@@ -114,35 +120,35 @@ int parse_options(int argc, char **argv)
 				tmp = strtol(optarg, NULL, 10);
 				if (tmp > 0)
 					g_args.device = tmp;
-			break;
+				break;
 
 			case 's':
 				g_args.serial = optarg;
-			break;
+				break;
 
 			case 't':
 				tmp = strtol(optarg, NULL, 10);
 				if (tmp > 0)
 					g_args.t_hold = tmp;
-			break;
+				break;
 
 			case 'v':
 				g_args.verbose = true;
-			break;
+				break;
 
 			case 'l':
 				find_all_ftdev();
 				exit(0);
-			break;
+				break;
 
 			case 'h':
 			case '?':
 				print_help();
 				exit(0);
-			break;
+				break;
 
 			default:
-			break;
+				break;
 		}
 	}
 }
@@ -166,6 +172,7 @@ int main(int argc, char **argv)
 	ret = ftdi_usb_find_all(ftdi, &devlist, 0, 0);
 	if (ret < 0) {
 		rff_err("ftdi_usb_find_all fail: %d (%s)\n", ret, ftdi_get_error_string(ftdi));
+		ftdi_free(ftdi);
 		exit(-1);
 	}
 
@@ -173,6 +180,7 @@ int main(int argc, char **argv)
 
 	if (g_args.serial) { /* select device by serial number */
 		char serial_num[USB_STR_PROP_SIZE];
+
 		rff_info("try to use device with serial number %s\n", g_args.serial);
 
 		for (curdev = devlist; curdev != NULL; curdev = curdev->next) {
@@ -190,12 +198,16 @@ int main(int argc, char **argv)
 
 		if (curdev == NULL) {
 			rff_err("ftdi: didn't found device with serial number %s\n", g_args.serial);
+			ftdi_list_free(&devlist);
+			ftdi_free(ftdi);
 			exit(-1);
 		}
 
 	} else { /* select device by index */
 		if (ret <= g_args.device) {
 			rff_err("ftdi: didn't found %lu device\n", g_args.device);
+			ftdi_list_free(&devlist);
+			ftdi_free(ftdi);
 			exit(-1);
 		}
 
@@ -208,6 +220,7 @@ int main(int argc, char **argv)
 	ret = ftdi_usb_open_dev(ftdi, curdev->dev);
 	if (ret < 0 && ret != -5) {
 		rff_err("unable to open ftdi device: %d (%s)\n", ret, ftdi_get_error_string(ftdi));
+		ftdi_list_free(&devlist);
 		ftdi_free(ftdi);
 		exit(-1);
 	}
@@ -264,8 +277,8 @@ int main(int argc, char **argv)
 		rff_dbg("libusb: successfuly attached device driver back, iface: %d, driver number %d\n", ftdi->interface, ret);
 
 	ftdi_usb_close(ftdi);
-	ftdi_free(ftdi);
 	ftdi_list_free(&devlist);
+	ftdi_free(ftdi);
 
 	exit(reset_ok ? 0 : -1);
 }
