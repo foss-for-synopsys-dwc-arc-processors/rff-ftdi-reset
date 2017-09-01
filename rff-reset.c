@@ -60,12 +60,12 @@ int find_all_ftdev(void)
 		return ret;
 	}
 
-	rff_info("number of FTDI devices found: %d\n", ret);
+	rff_info("number of FTDI devices found: %d\n\n", ret);
 
 	for (i = 0, curdev = devlist; curdev != NULL; i++, curdev = curdev->next) {
 		ret = libusb_get_device_descriptor(curdev->dev, &desc);
 		if (ret < 0) {
-			rff_err("device [%d] libusb_get_device_descriptor() failed: %d\n", i, ret);
+			rff_err("device [%d] libusb_get_device_descriptor() failed: %d\n\n", i, ret);
 			continue;
 		}
 
