@@ -10,6 +10,7 @@
 #include <ftdi.h>
 #include <stdbool.h>
 #include <getopt.h>
+#include <string.h>
 
 #include <libusb-1.0/libusb.h>
 //#include <libusb.h>
@@ -17,10 +18,12 @@
 #define RESET_PIN_MASK		0x40		//ACBUS6
 #define IO_BUFF_SIZE		3
 #define T_HOLD			(1 * 1000000)
+#define USB_STR_PROP_SIZE	128
 
 struct g_args_t {
 	unsigned long	device;
 	unsigned long	t_hold;
+	char 		*serial;
 	bool		verbose;
 };
 
@@ -40,10 +43,11 @@ int find_all_ftdev(void)
 {
 	struct ftdi_context *ftdi;
 	struct ftdi_device_list *devlist, *curdev;
-	char manufacturer[128], description[128];
+	char manufacturer[USB_STR_PROP_SIZE];
+	char description[USB_STR_PROP_SIZE];
+	char serial_num[USB_STR_PROP_SIZE];
 	struct libusb_device_descriptor desc;
 	int i, ret;
-
 	ftdi = ftdi_new();
 	if (ftdi == NULL) {
 		rff_err("ftdi_new failed\n");
@@ -58,31 +62,33 @@ int find_all_ftdev(void)
 
 	rff_info("number of FTDI devices found: %d\n", ret);
 
-	for (i = 0, curdev = devlist; curdev != NULL; i++) {
+	for (i = 0, curdev = devlist; curdev != NULL; i++, curdev = curdev->next) {
 		if (libusb_get_device_descriptor(curdev->dev, &desc) < 0)
 			rff_err("device [%d] libusb_get_device_descriptor() failed", i);
 		else
 			rff_info("device [%d] idVendor: %#x, idProduct %#x\n", i, desc.idVendor, desc.idProduct);
 
-		ret = ftdi_usb_get_strings(ftdi, curdev->dev, manufacturer, 128, description, 128, NULL, 0);
-		if (ret < 0) {
+		ret = ftdi_usb_get_strings(ftdi, curdev->dev,
+						manufacturer, USB_STR_PROP_SIZE,
+						description, USB_STR_PROP_SIZE,
+						serial_num, USB_STR_PROP_SIZE);
+		if (ret < 0)
 			rff_err("device [%d] ftdi_usb_get_strings failed: %d (%s)\n", i, ret, ftdi_get_error_string(ftdi));
-		} else {
-			rff_info("device [%d] manufacturer: %s, description: %s\n\n", i, manufacturer, description);
-		}
-		curdev = curdev->next;
+		else
+			rff_info("device [%d] manufacturer: %s, description: %s, serial: %s\n\n", i, manufacturer, description, serial_num);
 	}
 }
 
 void print_help(void)
 {
-	rff_info("Usage: rff-reset --dev 0 --t-hold 100000\n");
+	rff_info("Usage: rff-reset --serial 25164200005c --t-hold 100000\n");
 	rff_info("Options:\n");
-	rff_info("--dev <device number>  - specify ftdi device\n");
-	rff_info("--t-hold <time in uS>  - specify hold time\n");
-	rff_info("--list-dev             - find and list all connected ftdi devices\n");
-	rff_info("--help                 - print this info\n");
-	rff_info("--verbose              - print debug info and warnings\n");
+	rff_info("--dev <device index>     - specify ftdi device by index\n");
+	rff_info("--serial <serial number> - specify ftdi device by serial number\n");
+	rff_info("--t-hold <time in uS>    - specify hold time\n");
+	rff_info("--list-dev               - find and list all connected ftdi devices\n");
+	rff_info("--help                   - print this info\n");
+	rff_info("--verbose                - print debug info and warnings\n");
 }
 
 int parse_options(int argc, char **argv)
@@ -90,10 +96,11 @@ int parse_options(int argc, char **argv)
 	int opt;
 	long tmp;
 
-	static const char *short_options = "d:t:h?l";
+	static const char *short_options = "d:s:t:h?l";
 
 	const struct option long_options[] = {
 		{"dev", required_argument, NULL, 'd'},
+		{"serial", required_argument, NULL, 's'},
 		{"t-hold", required_argument, NULL, 't'},
 		{"help", no_argument, NULL, 'h'},
 		{"list-dev", no_argument, NULL, 'l'},
@@ -107,6 +114,10 @@ int parse_options(int argc, char **argv)
 				tmp = strtol(optarg, NULL, 10);
 				if (tmp > 0)
 					g_args.device = tmp;
+			break;
+
+			case 's':
+				g_args.serial = optarg;
 			break;
 
 			case 't':
@@ -160,19 +171,39 @@ int main(int argc, char **argv)
 
 	rff_info("number of FTDI devices found: %d\n", ret);
 
-	if (ret <= g_args.device) {
-		rff_err("ftdi: didn't found %lu device\n", g_args.device);
-		exit(-1);
+	if (g_args.serial) { /* select device by serial number */
+		char serial_num[USB_STR_PROP_SIZE];
+		rff_info("try to use device with serial number %s\n", g_args.serial);
+
+		for (curdev = devlist; curdev != NULL; curdev = curdev->next) {
+			ret = ftdi_usb_get_strings(ftdi, curdev->dev, NULL, 0, NULL, 0, serial_num, USB_STR_PROP_SIZE);
+			if (ret)
+				continue;
+
+			ret = strncmp(g_args.serial, serial_num, USB_STR_PROP_SIZE);
+			if (ret)
+				continue;
+
+			rff_dbg("ftdi: device found\n");
+			break;
+		}
+
+		if (curdev == NULL) {
+			rff_err("ftdi: didn't found device with serial number %s\n", g_args.serial);
+			exit(-1);
+		}
+
+	} else { /* select device by index */
+		if (ret <= g_args.device) {
+			rff_err("ftdi: didn't found %lu device\n", g_args.device);
+			exit(-1);
+		}
+
+		rff_info("try to use device with index %d\n", g_args.device);
+
+		for (i = 0, curdev = devlist; (curdev != NULL) && (i < g_args.device); i++)
+			curdev = curdev->next;
 	}
-
-	rff_info("try to use device number %d\n", g_args.device);
-
-	for (i = 0, curdev = devlist; (curdev != NULL) && (i < g_args.device); i++)
-		curdev = curdev->next;
-
-	ret = ftdi_set_interface(ftdi, INTERFACE_A);
-	if (ret)
-		rff_err("fail to set interface: %d (%s)\n", ret, ftdi_get_error_string(ftdi));
 
 	ret = ftdi_usb_open_dev(ftdi, curdev->dev);
 	if (ret < 0 && ret != -5) {
@@ -180,6 +211,10 @@ int main(int argc, char **argv)
 		ftdi_free(ftdi);
 		exit(-1);
 	}
+
+	ret = ftdi_set_interface(ftdi, INTERFACE_A);
+	if (ret)
+		rff_err("fail to set interface: %d (%s)\n", ret, ftdi_get_error_string(ftdi));
 
 	ret = ftdi_set_bitmode(ftdi, 0xFF, BITMODE_MPSSE);
 	if (ret)
