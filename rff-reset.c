@@ -18,7 +18,7 @@
 #define RESET_PIN_MASK		0x40		//ACBUS6 pin mask
 #define IO_BUFF_SIZE		3		//buff for ftdi_write_data: comand with 2 args
 #define T_HOLD			(1 * 1000000)	//default hold time
-#define USB_STR_PROP_SIZE	128		//
+#define USB_STR_PROP_SIZE	128		//buff for usb string properties
 
 struct g_args_t {
 	unsigned long	device;
