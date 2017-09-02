@@ -20,16 +20,18 @@
 #define USB_STR_PROP_SIZE	128		//buff for usb string properties
 
 struct g_args_t {
-	unsigned long	device;
+	long		device;
 	unsigned long	t_hold;
-	unsigned long	dev_specified;
 	char 		*serial;
 	bool		verbose;
+	bool		only_one;
 };
 
 struct g_args_t g_args = {
+	.device = -1,
 	.t_hold = T_HOLD,
 	.verbose = false,
+	.only_one = false,
 };
 
 #define pr_fmt(fmt) "rff: " fmt
@@ -91,7 +93,8 @@ void print_help(void)
 	printf("Options:\n");
 	printf(" --dev <device index>     - specify ftdi device by index (shown by rff-reset --list-dev)\n");
 	printf(" --serial <serial number> - specify ftdi device by serial number\n");
-	printf(" --t-hold <time in uS>    - specify hold time\n");
+	printf(" --only-one               - if only one ftdi device is connected reset it. Otherwise fail with error\n");
+	printf(" --t-hold <time in uS>    - specify hold time. Default one is %duS\n", T_HOLD);
 	printf(" --list                   - find and list all connected ftdi devices\n");
 	printf(" --help                   - print this info\n");
 	printf(" --verbose                - print debug info and warnings\n");
@@ -99,14 +102,16 @@ void print_help(void)
 
 int parse_options(int argc, char **argv)
 {
+	int dev_specified = 0;
 	int opt;
 	long tmp;
 
-	static const char *short_options = "d:s:t:h?vl";
+	static const char *short_options = "d:s:ot:h?vl";
 
 	static const struct option long_options[] = {
 		{"dev", required_argument, NULL, 'd'},
 		{"serial", required_argument, NULL, 's'},
+		{"only-one", no_argument, NULL, 'o'},
 		{"t-hold", required_argument, NULL, 't'},
 		{"help", no_argument, NULL, 'h'},
 		{"list", no_argument, NULL, 'l'},
@@ -117,15 +122,24 @@ int parse_options(int argc, char **argv)
 	while ((opt = getopt_long(argc, argv, short_options, long_options, NULL)) != -1) {
 		switch (opt) {
 			case 'd':
-				g_args.dev_specified++;
+				dev_specified++;
 				tmp = strtol(optarg, NULL, 10);
-				if (tmp > 0)
-					g_args.device = tmp;
+				if (tmp < 0) {
+					rff_err("wrong device index: %ld\n", tmp);
+					exit(EXIT_FAILURE);
+				}
+
+				g_args.device = tmp;
 				break;
 
 			case 's':
-				g_args.dev_specified++;
+				dev_specified++;
 				g_args.serial = optarg;
+				break;
+
+			case 'o':
+				dev_specified++;
+				g_args.only_one = true;
 				break;
 
 			case 't':
@@ -153,6 +167,17 @@ int parse_options(int argc, char **argv)
 				break;
 		}
 	}
+
+	if (dev_specified == 0) {
+		print_help();
+		exit(EXIT_SUCCESS);
+	}
+
+	if (dev_specified > 1) {
+		rff_err("you can't specify device via both index or serial number or only-one option\n");
+		print_help();
+		exit(EXIT_FAILURE);
+	}
 }
 
 int main(int argc, char **argv)
@@ -162,20 +187,9 @@ int main(int argc, char **argv)
 	struct ftdi_context *ftdi;
 	uint8_t iobuff[IO_BUFF_SIZE];
 	bool reset_ok = false;
-	int ret, i, dev_index;
+	int ret, i, dev_index, dev_number;
 
 	parse_options(argc, argv);
-
-	if (g_args.dev_specified == 0) {
-		print_help();
-		exit(EXIT_SUCCESS);
-	}
-
-	if (g_args.dev_specified > 1) {
-		rff_err("You can't specify device via both index and serial number\n");
-		print_help();
-		exit(EXIT_FAILURE);
-	}
 
 	ftdi = ftdi_new();
 	if (ftdi == NULL) {
@@ -183,13 +197,13 @@ int main(int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
-	ret = ftdi_usb_find_all(ftdi, &devlist, 0, 0);
-	if (ret < 0) {
-		rff_err("ftdi_usb_find_all fail: %d (%s)\n", ret, ftdi_get_error_string(ftdi));
+	dev_number = ftdi_usb_find_all(ftdi, &devlist, 0, 0);
+	if (dev_number < 0) {
+		rff_err("ftdi_usb_find_all fail: %d (%s)\n", dev_number, ftdi_get_error_string(ftdi));
 		goto err_ftdi_free;
 	}
 
-	rff_dbg("number of FTDI devices found: %d\n", ret);
+	rff_dbg("number of FTDI devices found: %d\n", dev_number);
 
 	if (g_args.serial) { /* select device by serial number */
 		rff_dbg("trying to use device with serial number: %s\n", g_args.serial);
@@ -213,9 +227,10 @@ int main(int argc, char **argv)
 		}
 
 		dev_index = i;
+	}
 
-	} else { /* select device by index */
-		if (ret <= g_args.device) {
+	if (g_args.device >= 0) { /* select device by index */
+		if (dev_number <= g_args.device) {
 			rff_err("ftdi: didn't found device with index: %lu\n", g_args.device);
 			goto err_ftdi_list_free;
 		}
@@ -230,6 +245,24 @@ int main(int argc, char **argv)
 		}
 
 		dev_index = i;
+		rff_dbg("trying to use device with index: %d, serial number: %s\n", g_args.device, serial_num);
+	}
+
+	if (g_args.only_one) { /* select device by only-one option */
+		if (dev_number != 1) {
+			rff_err("number of device found (%d) is not 1\n", dev_number);
+			goto err_ftdi_list_free;
+		}
+
+		curdev = devlist;
+
+		ret = ftdi_usb_get_strings(ftdi, curdev->dev, NULL, 0, NULL, 0, serial_num, USB_STR_PROP_SIZE);
+		if (ret) {
+			rff_err("ftdi_usb_get_strings fail: %d (%s)\n", ret, ftdi_get_error_string(ftdi));
+			goto err_ftdi_list_free;
+		}
+
+		dev_index = 0;
 		rff_dbg("trying to use device with index: %d, serial number: %s\n", g_args.device, serial_num);
 	}
 
@@ -299,5 +332,5 @@ err_ftdi_list_free:
 err_ftdi_free:
 	ftdi_free(ftdi);
 
-	exit(reset_ok ? 0 : -1);
+	exit(reset_ok ? EXIT_SUCCESS : EXIT_FAILURE);
 }
