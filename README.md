@@ -19,7 +19,7 @@ You can do it on fedora with next comand:
 sudo dnf install libftdi-devel libusb-devel
 ```
 
-Afrer that simply run make:
+After that simply run make:
 
 ```
 make

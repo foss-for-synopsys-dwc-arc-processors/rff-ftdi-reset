@@ -91,7 +91,7 @@ void print_help(void)
 	printf("Usage: rff-reset --serial 25164200005c --t-hold 100000\n");
 	printf("Usage: rff-reset --dev 1 --t-hold 100000\n");
 	printf("Options:\n");
-	printf(" --dev <device index>     - specify ftdi device by index (shown by rff-reset --list-dev)\n");
+	printf(" --dev <device index>     - specify ftdi device by index (shown by rff-reset --list)\n");
 	printf(" --serial <serial number> - specify ftdi device by serial number\n");
 	printf(" --only-one               - if only one ftdi device is connected reset it. Otherwise fail with error\n");
 	printf(" --t-hold <time in uS>    - specify hold time. Default one is %duS\n", T_HOLD);
