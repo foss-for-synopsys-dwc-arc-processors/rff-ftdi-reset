@@ -241,7 +241,7 @@ int main(int argc, char **argv)
 		ret = ftdi_usb_get_strings(ftdi, curdev->dev, NULL, 0, NULL, 0, serial_num, USB_STR_PROP_SIZE);
 		if (ret) {
 			rff_err("ftdi_usb_get_strings fail: %d (%s)\n", ret, ftdi_get_error_string(ftdi));
-			goto err_ftdi_list_free;
+			strncpy(serial_num, "???", USB_STR_PROP_SIZE);
 		}
 
 		dev_index = i;
@@ -259,7 +259,7 @@ int main(int argc, char **argv)
 		ret = ftdi_usb_get_strings(ftdi, curdev->dev, NULL, 0, NULL, 0, serial_num, USB_STR_PROP_SIZE);
 		if (ret) {
 			rff_err("ftdi_usb_get_strings fail: %d (%s)\n", ret, ftdi_get_error_string(ftdi));
-			goto err_ftdi_list_free;
+			strncpy(serial_num, "???", USB_STR_PROP_SIZE);
 		}
 
 		dev_index = 0;
