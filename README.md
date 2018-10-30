@@ -25,3 +25,9 @@ After that simply run make:
 make
 ```
 
+AXS101, AXS103, HSDK and other compatible boards have following
+FTDI bindings:
+ * ACBUS_6 - reset output
+ * ADBUS_0 - TXD
+ * ADBUS_1 - RXD
+
