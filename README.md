@@ -19,10 +19,22 @@ You can do it on fedora with next comand:
 sudo dnf install libftdi-devel libusb-devel
 ```
 
+For Ubuntu OS need to install packages by running the command:
+
+```
+sudo apt install -y libftdi-dev libusb-dev libusb-1.0-0-dev libftdi1-dev
+```
+
 After that simply run make:
 
 ```
 make
+```
+
+Example of running the utility on host where connected only one development board:
+
+```
+./rff-reset --only-one
 ```
 
 AXS101, AXS103, HSDK and other compatible boards have following
